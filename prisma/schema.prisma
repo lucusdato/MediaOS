@@ -1,0 +1,336 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ──────────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  PLANNER
+  KINESSO
+  FINANCE
+}
+
+enum CampaignStatus {
+  PLANNING
+  IN_FLIGHT
+  REPORTING
+  RECONCILIATION
+  COMPLETE
+}
+
+enum BlockingChartStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REVISION_REQUESTED
+}
+
+enum RowStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REVISION_REQUESTED
+}
+
+enum InvoiceStatus {
+  PENDING
+  RECONCILED
+  UNRECONCILED
+  OVERDUE
+  DISPUTED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum EntityType {
+  CAMPAIGN
+  BLOCKING_CHART
+  BLOCKING_CHART_ROW
+  DAB_SUBMISSION
+  COMMENT
+  INVOICE
+}
+
+enum DabStatus {
+  PENDING
+  RESPONDED
+  FEEDBACK
+  APPROVED
+  REJECTED
+}
+
+enum BudgetOverrideStatus {
+  NONE
+  REQUESTED
+  APPROVED
+  DENIED
+}
+
+// ─── Models ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid()) @map("id") @db.Uuid
+  email        String    @unique @map("email")
+  passwordHash String    @map("password_hash")
+  name         String    @map("name")
+  role         Role      @map("role")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  lastLoginAt  DateTime? @map("last_login_at")
+
+  // Relations
+  campaignsCreated     Campaign[]          @relation("CampaignCreatedBy")
+  chartsCreated        BlockingChart[]     @relation("ChartCreatedBy")
+  rowsCreated          BlockingChartRow[]  @relation("RowCreatedBy")
+  rowsModified         BlockingChartRow[]  @relation("RowModifiedBy")
+  commentsAuthored     Comment[]           @relation("CommentAuthor")
+  dabSubmissions       DabSubmission[]     @relation("DabSubmittedBy")
+  dabResponses         DabSubmission[]     @relation("DabRespondedBy")
+  dabApprovals         DabSubmission[]     @relation("DabApprovedBy")
+  auditLogs            AuditLog[]          @relation("AuditLogUser")
+  analyticsEvents      AnalyticsEvent[]    @relation("AnalyticsEventUser")
+
+  @@map("users")
+}
+
+model Campaign {
+  id             String         @id @default(uuid()) @map("id") @db.Uuid
+  name           String         @map("name")
+  client         String         @map("client")
+  businessUnit   String         @default("Foods & Wellness") @map("business_unit")
+  status         CampaignStatus @default(PLANNING) @map("status")
+  startDate      DateTime       @map("start_date") @db.Date
+  endDate        DateTime       @map("end_date") @db.Date
+  totalBudget    Decimal        @map("total_budget") @db.Decimal(14, 2)
+  createdById    String         @map("created_by_id") @db.Uuid
+  asanaProjectId String?        @map("asana_project_id")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  createdBy      User             @relation("CampaignCreatedBy", fields: [createdById], references: [id])
+  blockingCharts BlockingChart[]
+  dabSubmissions DabSubmission[]
+
+  @@map("campaigns")
+}
+
+model BlockingChart {
+  id          String             @id @default(uuid()) @map("id") @db.Uuid
+  campaignId  String             @map("campaign_id") @db.Uuid
+  version     Int                @default(1) @map("version")
+  status      BlockingChartStatus @default(DRAFT) @map("status")
+  createdById String             @map("created_by_id") @db.Uuid
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  // Relations
+  campaign  Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdBy User               @relation("ChartCreatedBy", fields: [createdById], references: [id])
+  rows      BlockingChartRow[]
+
+  @@unique([campaignId, version])
+  @@map("blocking_charts")
+}
+
+model BlockingChartRow {
+  id              String    @id @default(uuid()) @map("id") @db.Uuid
+  blockingChartId String    @map("blocking_chart_id") @db.Uuid
+  status          RowStatus @default(DRAFT) @map("status")
+  sortOrder       Int       @map("sort_order")
+  createdById     String    @map("created_by_id") @db.Uuid
+  modifiedById    String?   @map("modified_by_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  modifiedAt      DateTime  @updatedAt @map("modified_at")
+
+  // Channel fields (columns B-AB of Initiative blocking chart)
+  channel              String   @map("channel")
+  platform             String   @map("platform")
+  mediaType            String   @map("media_type")
+  buyType              String   @map("buy_type")
+  objective            String   @map("objective")
+  placements           String   @map("placements") @db.Text
+  accuticsCampaignName String   @map("accutics_campaign_name")
+  tagsRequired         String   @map("tags_required")
+  measurement          String   @map("measurement")
+  language             String   @map("language")
+
+  // Format
+  adFormat             String   @map("ad_format") @db.Text
+  estimatedViewability Decimal? @map("estimated_viewability") @db.Decimal(5, 4)
+
+  // KPIs
+  kpi      String   @map("kpi")
+  kpiValue Decimal? @map("kpi_value") @db.Decimal(10, 4)
+
+  // Target
+  target            String  @map("target") @db.Text
+  isSecondaryTarget Boolean @default(false) @map("is_secondary_target")
+  parentRowId       String? @map("parent_row_id") @db.Uuid
+
+  // Budget
+  estCpm      Decimal? @map("est_cpm") @db.Decimal(10, 4)
+  grossBudget Decimal  @map("gross_budget") @db.Decimal(14, 2)
+
+  // Dates
+  startDate DateTime @map("start_date") @db.Date
+  endDate   DateTime @map("end_date") @db.Date
+
+  // Fees
+  adServing     Decimal? @map("ad_serving") @db.Decimal(14, 2)
+  techFees      Decimal? @map("tech_fees") @db.Decimal(14, 2)
+  dataFees      Decimal? @map("data_fees") @db.Decimal(14, 2)
+  dvCostPrebid  Decimal? @map("dv_cost_prebid") @db.Decimal(14, 2)
+  dvCostPostbid Decimal? @map("dv_cost_postbid") @db.Decimal(14, 2)
+  buffer        Decimal? @map("buffer") @db.Decimal(14, 2)
+  netBudget     Decimal? @map("net_budget") @db.Decimal(14, 2)
+
+  // Impressions
+  estImpressions Int? @map("est_impressions")
+
+  // Taxonomy
+  taxonomyCode    String? @map("taxonomy_code")
+  taxonomyVersion String? @map("taxonomy_version")
+
+  // Traffic
+  lineItemId  String?   @map("line_item_id")
+  ioNumber    String?   @map("io_number")
+  ioSignedDate DateTime? @map("io_signed_date") @db.Date
+
+  // Post-report actuals
+  actualImpressions Int?     @map("actual_impressions")
+  actualCpm         Decimal? @map("actual_cpm") @db.Decimal(10, 4)
+  actualVcr         Decimal? @map("actual_vcr") @db.Decimal(5, 4)
+  actualCtr         Decimal? @map("actual_ctr") @db.Decimal(5, 4)
+  insights          String?  @map("insights") @db.Text
+
+  // Reconciliation
+  prismaLineRef    String?  @map("prisma_line_ref")
+  verificationFlag Boolean  @default(false) @map("verification_flag")
+
+  // Relations
+  blockingChart BlockingChart    @relation(fields: [blockingChartId], references: [id], onDelete: Cascade)
+  createdBy     User             @relation("RowCreatedBy", fields: [createdById], references: [id])
+  modifiedBy    User?            @relation("RowModifiedBy", fields: [modifiedById], references: [id])
+  parentRow     BlockingChartRow? @relation("SecondaryTargetRows", fields: [parentRowId], references: [id])
+  childRows     BlockingChartRow[] @relation("SecondaryTargetRows")
+  invoices      Invoice[]
+
+  @@map("blocking_chart_rows")
+}
+
+model DabSubmission {
+  id             String    @id @default(uuid()) @map("id") @db.Uuid
+  campaignId     String    @map("campaign_id") @db.Uuid
+  submittedById  String    @map("submitted_by_id") @db.Uuid
+  status         DabStatus @default(PENDING) @map("status")
+  rfpData        Json      @map("rfp_data")
+  responseData   Json?     @map("response_data")
+  respondedById  String?   @map("responded_by_id") @db.Uuid
+  respondedAt    DateTime? @map("responded_at")
+  approvedById   String?   @map("approved_by_id") @db.Uuid
+  approvedAt     DateTime? @map("approved_at")
+  feedbackRounds Int       @default(0) @map("feedback_rounds")
+  asanaTaskId    String?   @map("asana_task_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  submittedBy User     @relation("DabSubmittedBy", fields: [submittedById], references: [id])
+  respondedBy User?    @relation("DabRespondedBy", fields: [respondedById], references: [id])
+  approvedBy  User?    @relation("DabApprovedBy", fields: [approvedById], references: [id])
+
+  @@map("dab_submissions")
+}
+
+model Comment {
+  id             String     @id @default(uuid()) @map("id") @db.Uuid
+  entityType     EntityType @map("entity_type")
+  entityId       String     @map("entity_id") @db.Uuid
+  authorId       String     @map("author_id") @db.Uuid
+  body           String     @map("body") @db.Text
+  asanaCommentId String?    @map("asana_comment_id")
+  createdAt      DateTime   @default(now()) @map("created_at")
+
+  // Relations
+  author User @relation("CommentAuthor", fields: [authorId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("comments")
+}
+
+model Invoice {
+  id                 String        @id @default(uuid()) @map("id") @db.Uuid
+  blockingChartRowId String        @map("blocking_chart_row_id") @db.Uuid
+  vendor             String        @map("vendor")
+  amount             Decimal       @map("amount") @db.Decimal(14, 2)
+  dueDate            DateTime      @map("due_date") @db.Date
+  status             InvoiceStatus @default(PENDING) @map("status")
+  verificationNotes  String?       @map("verification_notes") @db.Text
+  paymentDate        DateTime?     @map("payment_date") @db.Date
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  blockingChartRow BlockingChartRow @relation(fields: [blockingChartRowId], references: [id], onDelete: Cascade)
+
+  @@map("invoices")
+}
+
+model AsanaSync {
+  id           String     @id @default(uuid()) @map("id") @db.Uuid
+  entityType   EntityType @map("entity_type")
+  entityId     String     @map("entity_id") @db.Uuid
+  asanaTaskId  String     @map("asana_task_id")
+  lastSyncedAt DateTime   @map("last_synced_at")
+
+  @@unique([entityType, entityId])
+  @@map("asana_syncs")
+}
+
+model AuditLog {
+  id         String     @id @default(uuid()) @map("id") @db.Uuid
+  userId     String?    @map("user_id") @db.Uuid
+  action     String     @map("action")
+  entityType EntityType @map("entity_type")
+  entityId   String     @map("entity_id") @db.Uuid
+  metadata   Json       @map("metadata")
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  // Relations
+  user User? @relation("AuditLogUser", fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model AnalyticsEvent {
+  id         String   @id @default(uuid()) @map("id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  eventType  String   @map("event_type")
+  section    String?  @map("section")
+  metadata   Json     @map("metadata")
+  durationMs Int?     @map("duration_ms")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation("AnalyticsEventUser", fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([section])
+  @@index([createdAt])
+  @@map("analytics_events")
+}

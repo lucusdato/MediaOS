@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'League Gothic';
+  src: url('/fonts/LeagueGothic-Regular.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Aldine721 BT';
+  src: url('/fonts/Aldine721BT-Roman.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+:root {
+  --bg-primary: #FFFFFF;
+  --bg-surface: #F9FAFB;
+  --bg-dark: #1F2937;
+  --bg-sidebar: #111827;
+  --border-light: #E5E7EB;
+  --border-medium: #D1D5DB;
+  --text-primary: #111827;
+  --text-secondary: #6B7280;
+  --text-muted: #9CA3AF;
+  --text-white: #FFFFFF;
+  --text-error: #EF4444;
+  --text-success: #10B981;
+  --status-complete: #10B981;
+  --status-progress: #3B82F6;
+  --status-warning: #F59E0B;
+  --status-overdue: #EF4444;
+  --status-notstarted: #D1D5DB;
+  --phase-make: #3B82F6;
+  --phase-mine: #F59E0B;
+  --phase-manage: #10B981;
+}
+
+/* Hide scrollbars but keep scrolling */
+*::-webkit-scrollbar {
+  display: none;
+}
+
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+body {
+  font-family: 'Aldine721 BT', serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
