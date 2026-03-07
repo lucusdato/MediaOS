@@ -1,8 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import Button from "@/components/ui/Button";
+import { ArrowUpDown, SlidersHorizontal, User } from "lucide-react";
+
+interface AuthUser {
+  name: string;
+  role: string;
+}
 
 export default function AppShellLayout({
   children,
@@ -10,6 +16,15 @@ export default function AppShellLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.user) setUser(data.user);
+      });
+  }, []);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -17,46 +32,92 @@ export default function AppShellLayout({
   }
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--bg-surface)" }}>
+    <div
+      className="flex flex-col overflow-hidden"
+      style={{ width: "100vw", height: "100vh", backgroundColor: "#FFFFFF" }}
+    >
       {/* Header */}
       <header
-        className="flex items-center justify-between px-6"
+        className="flex items-center justify-between shrink-0"
         style={{
-          height: "52px",
+          height: 52,
+          padding: "0 28px",
           background: "linear-gradient(180deg, #D4EEF5 0%, #7DD3E8 100%)",
         }}
       >
-        {/* Left: Logo */}
-        <div className="flex items-center">
-          <Image
-            src="/mediaos-logo.png"
-            alt="MediaOS"
-            width={140}
-            height={44}
-            style={{ height: "44px", width: "auto" }}
-            priority
-          />
-        </div>
-
-        {/* Right: User info + Logout */}
-        <div className="flex items-center gap-3">
-          <span
-            className="text-sm"
+        <Image
+          src="/mediaos-logo.png"
+          alt="MediaOS"
+          width={140}
+          height={44}
+          style={{ height: 44, width: "auto" }}
+          priority
+        />
+        <div className="flex items-center gap-4">
+          {[
+            {
+              icon: <ArrowUpDown size={16} color="#FFF" strokeWidth={2.5} />,
+              label: "Sort",
+            },
+            {
+              icon: (
+                <SlidersHorizontal size={16} color="#FFF" strokeWidth={2.5} />
+              ),
+              label: "Filters",
+            },
+          ].map((btn) => (
+            <button
+              key={btn.label}
+              className="flex items-center justify-center border-0 cursor-pointer"
+              style={{
+                backgroundColor: "#000",
+                borderRadius: 4,
+                padding: "6px 16px",
+                gap: 8,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {btn.icon}
+              <span
+                style={{
+                  fontFamily: "'Aldine721 BT', serif",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: "#FFF",
+                }}
+              >
+                {btn.label}
+              </span>
+            </button>
+          ))}
+          <button
+            onClick={handleLogout}
+            className="flex items-center justify-center border-0 cursor-pointer"
             style={{
-              fontFamily: "'Aldine721 BT', serif",
-              color: "var(--text-primary)",
+              backgroundColor: "#000",
+              borderRadius: 4,
+              padding: "6px 16px",
+              gap: 8,
+              whiteSpace: "nowrap",
             }}
           >
-            Admin
-          </span>
-          <Button variant="primary" size="sm" onClick={handleLogout}>
-            Logout
-          </Button>
+            <User size={16} color="#FFF" strokeWidth={2.5} />
+            <span
+              style={{
+                fontFamily: "'Aldine721 BT', serif",
+                fontSize: 13,
+                fontWeight: 500,
+                color: "#FFF",
+              }}
+            >
+              {user?.name ?? "Loading..."}
+            </span>
+          </button>
         </div>
       </header>
 
       {/* Page content */}
-      <main>{children}</main>
+      <main className="flex flex-col flex-1 overflow-hidden">{children}</main>
     </div>
   );
 }
