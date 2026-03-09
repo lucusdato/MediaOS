@@ -97,6 +97,38 @@ export async function getProjectTasks(projectGid: string): Promise<AsanaTask[]> 
   });
 }
 
+// --- Task detail (notes + permalink) ---
+
+export interface AsanaTaskDetail {
+  gid: string;
+  notes: string;
+  permalink_url: string;
+}
+
+export async function getTaskDetail(taskGid: string): Promise<AsanaTaskDetail> {
+  return asanaFetch<AsanaTaskDetail>(`/tasks/${taskGid}`, {
+    opt_fields: 'notes,permalink_url',
+  });
+}
+
+// --- Task comments (stories) ---
+
+export interface AsanaComment {
+  gid: string;
+  created_at: string;
+  text: string;
+  created_by: { gid: string; name: string } | null;
+  type: string;
+}
+
+export async function getTaskComments(taskGid: string): Promise<AsanaComment[]> {
+  const stories = await asanaFetch<AsanaComment[]>(`/tasks/${taskGid}/stories`, {
+    opt_fields: 'created_at,text,created_by.name,type',
+  });
+  // Only return actual comments, not system stories
+  return stories.filter((s) => s.type === 'comment');
+}
+
 export interface CampaignMilestone {
   gid: string;
   name: string;
