@@ -10,8 +10,14 @@ import {
   CalendarClock,
   ExternalLink,
   Loader2,
+  ArrowUpDown,
+  CheckCircle2,
+  Circle,
+  AlignLeft,
+  ListTree,
 } from "lucide-react";
 import type { CampaignData, CampaignMilestone } from "@/lib/asana";
+import { useFilters } from "@/lib/filter-context";
 
 // --- Timeline helpers ---
 
@@ -200,8 +206,9 @@ function ResizeHandle({
   return (
     <div
       onMouseDown={onMouseDown}
-      className="shrink-0 cursor-col-resize group/resize"
-      style={{ width: 5, position: "relative" }}
+      onClick={(e) => e.stopPropagation()}
+      className="shrink-0 self-stretch cursor-col-resize group/resize"
+      style={{ width: 9, position: "relative", zIndex: 1 }}
     >
       <div
         className="absolute inset-y-0 left-1/2 -translate-x-1/2 opacity-0 group-hover/resize:opacity-100 group-active/resize:opacity-100 transition-opacity"
@@ -213,6 +220,93 @@ function ResizeHandle({
       />
     </div>
   );
+}
+
+// --- Column resize hook ---
+type ColumnKey = "assignee" | "dueDate" | "campaign";
+
+const COLUMN_DEFAULTS: Record<ColumnKey, number> = {
+  assignee: 140,
+  dueDate: 110,
+  campaign: 150,
+};
+
+const COLUMN_MINS: Record<ColumnKey, number> = {
+  assignee: 80,
+  dueDate: 80,
+  campaign: 80,
+};
+
+const COLUMN_MAXES: Record<ColumnKey, number> = {
+  assignee: 300,
+  dueDate: 200,
+  campaign: 300,
+};
+
+const COL_WIDTHS_KEY = "mediaos-task-col-widths";
+
+function useColumnResize() {
+  const [widths, setWidths] = useState<Record<ColumnKey, number>>(() => {
+    if (typeof window === "undefined") return { ...COLUMN_DEFAULTS };
+    try {
+      const stored = localStorage.getItem(COL_WIDTHS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.assignee && parsed.dueDate && parsed.campaign) return parsed;
+      }
+    } catch {}
+    return { ...COLUMN_DEFAULTS };
+  });
+
+  const draggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+  const activeColRef = useRef<ColumnKey>("assignee");
+  const invertedRef = useRef(false);
+
+  const handleResizeStart = useCallback(
+    (column: ColumnKey, inverted: boolean) => (e: React.MouseEvent) => {
+      e.preventDefault();
+      draggingRef.current = true;
+      startXRef.current = e.clientX;
+      startWidthRef.current = widths[column];
+      activeColRef.current = column;
+      invertedRef.current = inverted;
+
+      const min = COLUMN_MINS[column];
+      const max = COLUMN_MAXES[column];
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!draggingRef.current) return;
+        const rawDelta = ev.clientX - startXRef.current;
+        const delta = invertedRef.current ? rawDelta : -rawDelta;
+        const newWidth = Math.min(max, Math.max(min, startWidthRef.current + delta));
+        setWidths((prev) => ({ ...prev, [activeColRef.current]: newWidth }));
+      };
+
+      const onMouseUp = () => {
+        draggingRef.current = false;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        setWidths((current) => {
+          try {
+            localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(current));
+          } catch {}
+          return current;
+        });
+      };
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [widths]
+  );
+
+  return { widths, handleResizeStart };
 }
 
 // --- Calendar header ---
@@ -466,130 +560,25 @@ interface TaskItem {
   overdue: boolean;
   assignee: string | null;
   section: string;
-}
-
-// --- Resizable column header ---
-function ResizableColumnHeader({
-  columns,
-  onResize,
-}: {
-  columns: { key: string; label: string; width: number; minWidth: number }[];
-  onResize: (key: string, width: number) => void;
-}) {
-  return (
-    <div
-      className="flex items-center"
-      style={{
-        height: 36,
-        padding: "0 20px",
-        backgroundColor: "var(--bg-surface)",
-        borderBottom: "1px solid var(--border-light)",
-      }}
-    >
-      {columns.map((col, i) => {
-        // The resize handle on the left edge of a column resizes that column
-        const nextCol = i > 0 ? col : null;
-        return (
-          <div
-            key={col.key}
-            className="flex items-center"
-            style={{
-              width: i === 0 ? undefined : col.width,
-              flex: i === 0 ? "1 1 0" : undefined,
-              minWidth: i === 0 ? 0 : col.minWidth,
-              flexShrink: i === 0 ? undefined : 0,
-            }}
-          >
-            {nextCol && (
-              <ColumnResizeHandle
-                colKey={nextCol.key}
-                initialWidth={nextCol.width}
-                minWidth={nextCol.minWidth}
-                onResizeEnd={onResize}
-              />
-            )}
-            <span
-              style={{
-                fontFamily: "'Aldine721 BT', serif",
-                fontSize: 12,
-                fontWeight: 700,
-                color: "var(--text-primary)",
-                flex: 1,
-              }}
-            >
-              {col.label}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ColumnResizeHandle({
-  colKey,
-  initialWidth,
-  minWidth,
-  onResizeEnd,
-}: {
-  colKey: string;
-  initialWidth: number;
-  minWidth: number;
-  onResizeEnd: (key: string, width: number) => void;
-}) {
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startWidth = initialWidth;
-
-      const onMouseMove = (ev: MouseEvent) => {
-        const delta = startX - ev.clientX;
-        const newWidth = Math.max(minWidth, startWidth + delta);
-        onResizeEnd(colKey, newWidth);
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      };
-
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    },
-    [colKey, initialWidth, minWidth, onResizeEnd]
-  );
-
-  return (
-    <div
-      onMouseDown={handleMouseDown}
-      className="cursor-col-resize shrink-0 hover:bg-blue-200 active:bg-blue-300"
-      style={{
-        width: 8,
-        height: 36,
-        marginRight: -4,
-        marginLeft: -4,
-        zIndex: 1,
-        borderRadius: 2,
-      }}
-    />
-  );
+  notes: string;
+  numSubtasks: number;
+  commentCount?: number;
 }
 
 function TaskRow({
   task,
   isSelected,
   onClick,
+  cachedCommentCount,
   columnWidths,
+  columnResizeStart,
 }: {
   task: TaskItem;
   isSelected: boolean;
   onClick: () => void;
-  columnWidths: { dueDate: number; campaign: number; status: number };
+  cachedCommentCount?: number;
+  columnWidths: Record<ColumnKey, number>;
+  columnResizeStart: (column: ColumnKey, inverted: boolean) => (e: React.MouseEvent) => void;
 }) {
   const statusLabel = task.completed
     ? "Complete"
@@ -600,7 +589,7 @@ function TaskRow({
     ? "var(--status-complete)"
     : task.overdue
       ? "var(--status-overdue)"
-      : "var(--text-primary)";
+      : "#6B7280";
 
   const formattedDate = task.dueDate
     ? new Date(task.dueDate + "T00:00:00").toLocaleDateString("en-US", {
@@ -609,70 +598,215 @@ function TaskRow({
       })
     : "\u2014";
 
+  // Truncate description to first line / ~120 chars
+  const descPreview = task.notes
+    ? task.notes.split("\n")[0].slice(0, 140) + (task.notes.length > 140 ? "..." : "")
+    : "";
+
+  const commentCount = task.commentCount ?? cachedCommentCount;
+
   return (
     <div
-      className="flex items-center cursor-pointer hover:bg-gray-50"
+      className="flex cursor-pointer transition-colors"
       onClick={onClick}
       style={{
-        height: 48,
-        padding: "0 20px",
-        backgroundColor: isSelected ? "#F3F4F6" : "#FFFFFF",
+        padding: "10px 20px",
+        backgroundColor: isSelected ? "#F0F4FF" : "#FFFFFF",
         borderBottom: "1px solid var(--border-light)",
       }}
+      onMouseEnter={(e) => {
+        if (!isSelected)
+          (e.currentTarget as HTMLElement).style.backgroundColor = "#FAFAFA";
+      }}
+      onMouseLeave={(e) => {
+        if (!isSelected)
+          (e.currentTarget as HTMLElement).style.backgroundColor = "#FFFFFF";
+      }}
     >
-      <span
-        className="truncate"
-        style={{
-          fontFamily: "'Aldine721 BT', serif",
-          fontSize: 14,
-          color: "var(--text-primary)",
-          flex: "1 1 0",
-          minWidth: 0,
-        }}
-      >
-        {task.name}
-      </span>
-      <span
-        style={{
-          fontFamily: "'Aldine721 BT', serif",
-          fontSize: 14,
-          color: task.overdue ? "var(--status-overdue)" : "var(--text-primary)",
-          width: columnWidths.dueDate,
-          flexShrink: 0,
-        }}
-      >
-        {formattedDate}
-      </span>
-      <span
-        className="truncate"
-        style={{
-          fontFamily: "'Aldine721 BT', serif",
-          fontSize: 14,
-          color: "var(--text-primary)",
-          width: columnWidths.campaign,
-          flexShrink: 0,
-        }}
-      >
-        {task.campaign}
-      </span>
-      <span
-        className="flex items-center gap-1.5"
-        style={{ width: columnWidths.status, flexShrink: 0 }}
-      >
+      {/* Left: task info (flex) */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Row 1: Checkbox + Task name + inline metadata */}
+        <div className="flex items-center gap-3">
+          {/* Completion indicator */}
+          <div className="shrink-0" style={{ width: 20 }}>
+            {task.completed ? (
+              <CheckCircle2 size={18} style={{ color: "var(--status-complete)" }} />
+            ) : task.overdue ? (
+              <Circle size={18} style={{ color: "var(--status-overdue)" }} />
+            ) : (
+              <Circle size={18} style={{ color: "#D1D5DB" }} />
+            )}
+          </div>
+
+          {/* Task name */}
+          <span
+            className="truncate flex-1 min-w-0"
+            style={{
+              fontFamily: "'Aldine721 BT', serif",
+              fontSize: 14,
+              fontWeight: 600,
+              color: "var(--text-primary)",
+            }}
+          >
+            {task.name}
+          </span>
+
+          {/* Inline chips */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Subtask count */}
+            {task.numSubtasks > 0 && (
+              <span
+                className="flex items-center gap-1"
+                style={{
+                  fontFamily: "'Aldine721 BT', serif",
+                  fontSize: 12,
+                  color: "#9CA3AF",
+                }}
+                title={`${task.numSubtasks} subtask${task.numSubtasks !== 1 ? "s" : ""}`}
+              >
+                <ListTree size={13} />
+                {task.numSubtasks}
+              </span>
+            )}
+
+            {/* Comment count (when cached) */}
+            {commentCount != null && commentCount > 0 && (
+              <span
+                className="flex items-center gap-1"
+                style={{
+                  fontFamily: "'Aldine721 BT', serif",
+                  fontSize: 12,
+                  color: "#9CA3AF",
+                }}
+                title={`${commentCount} comment${commentCount !== 1 ? "s" : ""}`}
+              >
+                <MessageCircle size={13} />
+                {commentCount}
+              </span>
+            )}
+
+          </div>
+        </div>
+
+        {/* Row 2: Description preview */}
+        {descPreview && (
+          <div
+            className="truncate"
+            style={{
+              fontFamily: "'Aldine721 BT', serif",
+              fontSize: 12,
+              color: "#9CA3AF",
+              marginTop: 3,
+              paddingLeft: 32,
+              lineHeight: 1.4,
+            }}
+          >
+            <AlignLeft
+              size={11}
+              className="inline-block mr-1"
+              style={{ color: "#D1D5DB", verticalAlign: "middle", marginTop: -1 }}
+            />
+            {descPreview}
+          </div>
+        )}
+
+        {/* Row 3: Status + Section */}
         <div
-          className="rounded-full shrink-0"
-          style={{ width: 8, height: 8, backgroundColor: statusColor }}
-        />
+          className="flex items-center gap-2"
+          style={{ marginTop: 4, paddingLeft: 32 }}
+        >
+          <span
+            className="flex items-center gap-1"
+            style={{
+              fontFamily: "'Aldine721 BT', serif",
+              fontSize: 11,
+              color: statusColor,
+            }}
+          >
+            <div
+              className="rounded-full shrink-0"
+              style={{ width: 6, height: 6, backgroundColor: statusColor }}
+            />
+            {statusLabel}
+          </span>
+
+          <span style={{ color: "#E5E7EB", fontSize: 11 }}>&middot;</span>
+
+          <span
+            style={{
+              fontFamily: "'Aldine721 BT', serif",
+              fontSize: 11,
+              color: "#9CA3AF",
+            }}
+          >
+            {task.section}
+          </span>
+        </div>
+      </div>
+
+      {/* Handle: Task Name | Assignee boundary */}
+      <ResizeHandle onMouseDown={columnResizeStart("assignee", false)} />
+
+      {/* Assignee column */}
+      <div
+        className="flex items-center shrink-0"
+        style={{ width: columnWidths.assignee, alignSelf: "center" }}
+      >
         <span
+          className="truncate"
           style={{
             fontFamily: "'Aldine721 BT', serif",
-            fontSize: 14,
-            color: statusColor,
+            fontSize: 13,
+            color: task.assignee ? "var(--text-primary)" : "#D1D5DB",
           }}
         >
-          {statusLabel}
+          {task.assignee ?? "Unassigned"}
         </span>
-      </span>
+      </div>
+
+      {/* Handle: Assignee | Due Date boundary */}
+      <ResizeHandle onMouseDown={columnResizeStart("assignee", false)} />
+
+      {/* Due Date column */}
+      <div
+        className="flex items-center shrink-0"
+        style={{ width: columnWidths.dueDate, alignSelf: "center" }}
+      >
+        <span
+          className="flex items-center gap-1"
+          style={{
+            fontFamily: "'Aldine721 BT', serif",
+            fontSize: 13,
+            color: task.overdue ? "var(--status-overdue)" : "var(--text-primary)",
+            fontWeight: task.overdue ? 600 : 400,
+          }}
+        >
+          {formattedDate}
+        </span>
+      </div>
+
+      {/* Handle: Due Date | Campaign boundary */}
+      <ResizeHandle onMouseDown={columnResizeStart("dueDate", false)} />
+
+      {/* Campaign column */}
+      <div
+        className="flex items-center shrink-0"
+        style={{ width: columnWidths.campaign, alignSelf: "center" }}
+      >
+        <span
+          className="truncate"
+          style={{
+            fontFamily: "'Aldine721 BT', serif",
+            fontSize: 13,
+            color: "var(--text-primary)",
+          }}
+        >
+          {task.campaign}
+        </span>
+      </div>
+
+      {/* Handle: Campaign right edge */}
+      <ResizeHandle onMouseDown={columnResizeStart("campaign", false)} />
     </div>
   );
 }
@@ -1278,6 +1412,8 @@ function CampaignTimelineRow({
 // === MAIN DASHBOARD ===
 export default function DashboardPage() {
   const [campaigns, setCampaigns] = useState<CampaignData[]>([]);
+  const { campaignDateSort: dueDateSort } = useFilters();
+  const [taskSort, setTaskSort] = useState<"asc" | "desc">("asc");
   const [loading, setLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -1285,6 +1421,8 @@ export default function DashboardPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const detailCacheRef = useRef<Map<string, TaskDetail>>(new Map());
   const timelineScrollRef = useRef<HTMLDivElement>(null);
+  const sidebarScrollRef = useRef<HTMLDivElement>(null);
+  const syncingScroll = useRef(false);
 
   // Fetch task detail (notes + comments) when a task is selected, with cache
   useEffect(() => {
@@ -1320,6 +1458,7 @@ export default function DashboardPage() {
   // Resizable panels
   const sidebar = useResizable(170, 120, 350, "right");
   const detailPanel = useResizable(520, 320, 800, "left");
+  const columns = useColumnResize();
 
   // Resizable timeline height
   const [timelineHeight, setTimelineHeight] = useState(260);
@@ -1356,27 +1495,6 @@ export default function DashboardPage() {
       document.addEventListener("mouseup", onMouseUp);
     },
     [timelineHeight]
-  );
-
-  // Resizable task columns
-  const [colWidths, setColWidths] = useState({
-    dueDate: 100,
-    campaign: 150,
-    status: 120,
-  });
-
-  const handleColumnResize = useCallback((key: string, width: number) => {
-    setColWidths((prev) => ({ ...prev, [key]: width }));
-  }, []);
-
-  const taskColumns = useMemo(
-    () => [
-      { key: "task", label: "Task", width: 0, minWidth: 100 },
-      { key: "dueDate", label: "Due Date", width: colWidths.dueDate, minWidth: 70 },
-      { key: "campaign", label: "Campaign", width: colWidths.campaign, minWidth: 80 },
-      { key: "status", label: "Status", width: colWidths.status, minWidth: 80 },
-    ],
-    [colWidths]
   );
 
   useEffect(() => {
@@ -1442,6 +1560,19 @@ export default function DashboardPage() {
   }, [loading]);
 
   // Flatten tasks from all campaigns
+  const sortedCampaigns = useMemo(() => {
+    if (!dueDateSort) return campaigns;
+    return [...campaigns].sort((a, b) => {
+      const aDate = a.endDate ?? "";
+      const bDate = b.endDate ?? "";
+      if (!aDate) return 1;
+      if (!bDate) return -1;
+      return dueDateSort === "asc"
+        ? aDate.localeCompare(bDate)
+        : bDate.localeCompare(aDate);
+    });
+  }, [campaigns, dueDateSort]);
+
   const allTasks: TaskItem[] = useMemo(() => {
     const items: TaskItem[] = [];
     for (const c of campaigns) {
@@ -1457,15 +1588,19 @@ export default function DashboardPage() {
           overdue: t.overdue,
           assignee: t.assignee,
           section: t.section,
+          notes: t.notes ?? "",
+          numSubtasks: t.numSubtasks ?? 0,
         });
       }
     }
     return items.sort((a, b) => {
       if (!a.dueDate) return 1;
       if (!b.dueDate) return -1;
-      return a.dueDate.localeCompare(b.dueDate);
+      return taskSort === "asc"
+        ? a.dueDate.localeCompare(b.dueDate)
+        : b.dueDate.localeCompare(a.dueDate);
     });
-  }, [campaigns]);
+  }, [campaigns, taskSort]);
 
   // Widget counts
   const overdueCount = allTasks.filter((t) => t.overdue).length;
@@ -1520,10 +1655,10 @@ export default function DashboardPage() {
         <div className="flex shrink-0">
           <div
             className="flex flex-col shrink-0"
-            style={{ width: sidebar.width }}
+            style={{ width: sidebar.width, overflow: "hidden" }}
           >
             <div
-              className="flex items-center justify-between"
+              className="flex items-center justify-between shrink-0"
               style={{
                 height: 56,
                 padding: "0 14px",
@@ -1571,25 +1706,47 @@ export default function DashboardPage() {
                 </button>
               )}
             </div>
-            {campaigns.map((c) => {
-              const { name, brand } = shortCampaignName(c.name);
-              return (
-                <SidebarEntry
-                  key={c.gid}
-                  name={name}
-                  subtitle={brand}
-                  indicatorColor={campaignIndicator(c)}
-                  width={sidebar.width}
-                />
-              );
-            })}
+            <div
+              ref={sidebarScrollRef}
+              className="flex-1 overflow-y-auto"
+              style={{ scrollbarWidth: "none" }}
+              onScroll={() => {
+                if (syncingScroll.current) return;
+                syncingScroll.current = true;
+                const el = sidebarScrollRef.current;
+                const tl = timelineScrollRef.current;
+                if (el && tl) tl.scrollTop = el.scrollTop;
+                syncingScroll.current = false;
+              }}
+            >
+              {sortedCampaigns.map((c) => {
+                const { name, brand } = shortCampaignName(c.name);
+                return (
+                  <SidebarEntry
+                    key={c.gid}
+                    name={name}
+                    subtitle={brand}
+                    indicatorColor={campaignIndicator(c)}
+                    width={sidebar.width}
+                  />
+                );
+              })}
+            </div>
           </div>
           <ResizeHandle onMouseDown={sidebar.onMouseDown} />
         </div>
         {/* Scrollable timeline */}
         <div
-          className="flex-1 overflow-x-auto relative"
+          className="flex-1 overflow-auto relative"
           ref={timelineScrollRef}
+          onScroll={() => {
+            if (syncingScroll.current) return;
+            syncingScroll.current = true;
+            const tl = timelineScrollRef.current;
+            const el = sidebarScrollRef.current;
+            if (tl && el) el.scrollTop = tl.scrollTop;
+            syncingScroll.current = false;
+          }}
         >
           <div style={{ width: timelineWidth }}>
             <CalendarHeader
@@ -1597,7 +1754,7 @@ export default function DashboardPage() {
               timelineWidth={timelineWidth}
               showAllDays={showAllDays}
             />
-            {campaigns.map((c, i) => (
+            {sortedCampaigns.map((c, i) => (
               <CampaignTimelineRow
                 key={c.gid}
                 campaign={c}
@@ -1684,7 +1841,7 @@ export default function DashboardPage() {
           >
             <div
               className="flex items-center flex-1"
-              style={{ paddingLeft: 22, paddingRight: 16 }}
+              style={{ paddingLeft: 22, paddingRight: 20 }}
             >
               <ListChecks
                 size={16}
@@ -1702,15 +1859,54 @@ export default function DashboardPage() {
                 UPCOMING TASKS
               </span>
               <span className="flex-1" />
+              {/* Column labels aligned with task row columns */}
+              <ResizeHandle onMouseDown={columns.handleResizeStart("assignee", false)} />
               <span
                 style={{
+                  width: columns.widths.assignee,
+                  flexShrink: 0,
                   fontFamily: "'Aldine721 BT', serif",
                   fontSize: 12,
+                  fontWeight: 700,
                   color: "var(--text-primary)",
                 }}
               >
-                {allTasks.length} tasks
+                Assignee
               </span>
+              <ResizeHandle onMouseDown={columns.handleResizeStart("assignee", false)} />
+              <button
+                onClick={() => setTaskSort((prev) => (prev === "asc" ? "desc" : "asc"))}
+                className="flex items-center gap-1.5 hover:opacity-70 transition-opacity cursor-pointer"
+                style={{
+                  width: columns.widths.dueDate,
+                  flexShrink: 0,
+                  fontFamily: "'Aldine721 BT', serif",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "var(--text-primary)",
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                }}
+                title={taskSort === "asc" ? "Earliest due first" : "Latest due first"}
+              >
+                Due Date
+                <ArrowUpDown size={11} style={{ color: "var(--text-muted)" }} />
+              </button>
+              <ResizeHandle onMouseDown={columns.handleResizeStart("dueDate", false)} />
+              <span
+                style={{
+                  width: columns.widths.campaign,
+                  flexShrink: 0,
+                  fontFamily: "'Aldine721 BT', serif",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "var(--text-primary)",
+                }}
+              >
+                Campaign
+              </span>
+              <ResizeHandle onMouseDown={columns.handleResizeStart("campaign", false)} />
             </div>
             {showDetail && (
               <div
@@ -1745,23 +1941,23 @@ export default function DashboardPage() {
           <div className="flex flex-1 overflow-hidden">
             {/* Task list */}
             <div className="flex flex-col flex-1 overflow-y-auto">
-              <ResizableColumnHeader
-                columns={taskColumns}
-                onResize={handleColumnResize}
-              />
-
-              {allTasks.map((t) => (
-                <TaskRow
-                  key={t.gid}
-                  task={t}
-                  isSelected={selectedTask?.gid === t.gid}
-                  onClick={() => {
-                    setSelectedTask(t);
-                    setShowDetail(true);
-                  }}
-                  columnWidths={colWidths}
-                />
-              ))}
+              {allTasks.map((t) => {
+                const cached = detailCacheRef.current.get(t.gid);
+                return (
+                  <TaskRow
+                    key={t.gid}
+                    task={t}
+                    isSelected={selectedTask?.gid === t.gid}
+                    onClick={() => {
+                      setSelectedTask(t);
+                      setShowDetail(true);
+                    }}
+                    cachedCommentCount={cached?.comments?.length}
+                    columnWidths={columns.widths}
+                    columnResizeStart={columns.handleResizeStart}
+                  />
+                );
+              })}
               {allTasks.length === 0 && (
                 <div
                   className="flex items-center justify-center py-12"
