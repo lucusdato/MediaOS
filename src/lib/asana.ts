@@ -1,7 +1,7 @@
 const ASANA_BASE = 'https://app.asana.com/api/1.0';
 
 function getToken(): string {
-  const token = process.env.ASANA_ACCESS_TOKEN;
+  const token = process.env.ASANA_PAT;
   if (!token) throw new Error('ASANA_ACCESS_TOKEN not set');
   return token;
 }
@@ -49,6 +49,8 @@ export interface AsanaTask {
   resource_subtype: 'default_task' | 'milestone';
   assignee: { gid: string; name: string } | null;
   memberships: { section: { gid: string; name: string } }[];
+  notes: string;
+  num_subtasks: number;
 }
 
 export interface AsanaSection {
@@ -75,6 +77,19 @@ export function sectionToPhase(sectionName: string): Phase | null {
   return null;
 }
 
+// --- Portfolio ---
+
+interface AsanaPortfolioItem {
+  gid: string;
+  name: string;
+}
+
+export async function getPortfolioProjects(portfolioGid: string): Promise<AsanaPortfolioItem[]> {
+  return asanaFetch<AsanaPortfolioItem[]>(`/portfolios/${portfolioGid}/items`, {
+    opt_fields: 'name',
+  });
+}
+
 // --- API functions ---
 
 export async function getProject(projectGid: string): Promise<AsanaProject> {
@@ -92,9 +107,41 @@ export async function getProjectSections(projectGid: string): Promise<AsanaSecti
 export async function getProjectTasks(projectGid: string): Promise<AsanaTask[]> {
   return asanaFetch<AsanaTask[]>(`/tasks`, {
     project: projectGid,
-    opt_fields: 'name,due_on,completed,completed_at,resource_subtype,assignee.name,memberships.section.name',
+    opt_fields: 'name,due_on,completed,completed_at,resource_subtype,assignee.name,memberships.section.name,notes,num_subtasks',
     limit: '100',
   });
+}
+
+// --- Task detail (notes + permalink) ---
+
+export interface AsanaTaskDetail {
+  gid: string;
+  notes: string;
+  permalink_url: string;
+}
+
+export async function getTaskDetail(taskGid: string): Promise<AsanaTaskDetail> {
+  return asanaFetch<AsanaTaskDetail>(`/tasks/${taskGid}`, {
+    opt_fields: 'notes,permalink_url',
+  });
+}
+
+// --- Task comments (stories) ---
+
+export interface AsanaComment {
+  gid: string;
+  created_at: string;
+  text: string;
+  created_by: { gid: string; name: string } | null;
+  type: string;
+}
+
+export async function getTaskComments(taskGid: string): Promise<AsanaComment[]> {
+  const stories = await asanaFetch<AsanaComment[]>(`/tasks/${taskGid}/stories`, {
+    opt_fields: 'created_at,text,created_by.name,type',
+  });
+  // Only return actual comments, not system stories
+  return stories.filter((s) => s.type === 'comment');
 }
 
 export interface CampaignMilestone {
@@ -123,6 +170,8 @@ export interface CampaignData {
     overdue: boolean;
     assignee: string | null;
     section: string;
+    notes: string;
+    numSubtasks: number;
   }[];
 }
 
@@ -167,6 +216,8 @@ export async function getCampaignData(projectGid: string): Promise<CampaignData>
         overdue: isOverdue,
         assignee: task.assignee?.name ?? null,
         section: sectionName,
+        notes: task.notes ?? '',
+        numSubtasks: task.num_subtasks ?? 0,
       });
     }
   }

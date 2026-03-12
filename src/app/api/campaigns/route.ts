@@ -1,17 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getCampaignData } from '@/lib/asana';
+import { getCampaignData, getPortfolioProjects } from '@/lib/asana';
 import { logger } from '@/lib/logger';
 
-// MVP: two hardcoded Asana project GIDs
-const PROJECT_GIDS = [
-  '1211551512551717', // Hellmann's Doritos Local
-  '1213513346089729', // MediaOS Test Campaign
-];
+const PORTFOLIO_GID = '1208962792886843'; // Foods & Wellbeing
 
 export async function GET() {
   try {
+    const projects = await getPortfolioProjects(PORTFOLIO_GID);
+
     const campaigns = await Promise.all(
-      PROJECT_GIDS.map((gid) => getCampaignData(gid))
+      projects.map((p) => getCampaignData(p.gid))
     );
 
     return NextResponse.json({ campaigns });
